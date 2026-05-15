@@ -4,7 +4,7 @@ A cross-platform desktop app that monitors your clipboard and lets you quickly t
 
 ## Use Case
 
-When using LLM agents via SSH from a Windows workstation, clipboard operations (copy/paste) don't work over SSH. This tool solves that by:
+When using LLM agents via SSH from a remote workstation, clipboard operations (copy/paste) don't work over SSH. This tool solves that by:
 
 1. Copy an image or text to your clipboard locally
 2. Select a remote host from your SSH config
