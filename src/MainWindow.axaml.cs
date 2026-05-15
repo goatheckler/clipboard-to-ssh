@@ -37,6 +37,7 @@ public partial class MainWindow : Window
             _clipboardMonitor.StartMonitoring(250);
 
             LoadHosts();
+            UpdateHistoryButtonStates();
         }
     }
 
@@ -89,6 +90,15 @@ public partial class MainWindow : Window
             _clipboardMonitor?.StartMonitoring(250);
             PollingToggle.Content = "Monitoring";
             StatusText.Text = "Clipboard polling active";
+            _viewModel?.NavigateForwardCommand.Execute(null);
+
+            if (_viewModel?.CurrentContent != null)
+            {
+                UpdateContentDisplay(_viewModel.CurrentContent);
+            }
+
+            HistoryPositionText.Text = _viewModel?.HistoryPositionText ?? "";
+            UpdateHistoryButtonStates();
         }
     }
 
@@ -100,14 +110,91 @@ public partial class MainWindow : Window
             ContentImage.IsVisible = false;
             ContentText.Text = "";
             _viewModel!.CurrentContent = null;
+            _viewModel!.ImageOnlyMode = true;
+            ImageOnlyToggle.Content = "Images Only";
             StatusText.Text = "Image-only mode enabled";
         }
         else
         {
+            _viewModel!.ImageOnlyMode = false;
+            ImageOnlyToggle.Content = "All Content";
             StatusText.Text = "Image-only mode disabled";
             _clipboardMonitor?.StopMonitoring();
             _clipboardMonitor?.StartMonitoring(250);
         }
+    }
+
+    private void HistoryBack_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_viewModel == null) return;
+
+        _viewModel.NavigateBackCommand.Execute(null);
+        HistoryPositionText.Text = _viewModel.HistoryPositionText;
+
+        if (_viewModel.IsViewingHistory)
+        {
+            _clipboardMonitor?.StopMonitoring();
+            PollingToggle.IsChecked = true;
+            PollingToggle.Content = "Paused";
+
+            if (_viewModel.CurrentContent != null)
+            {
+                UpdateContentDisplay(_viewModel.CurrentContent);
+            }
+        }
+
+        UpdateHistoryButtonStates();
+    }
+
+    private void HistoryForward_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_viewModel == null) return;
+
+        _viewModel.NavigateForwardCommand.Execute(null);
+        HistoryPositionText.Text = _viewModel.HistoryPositionText;
+
+        if (!_viewModel.IsViewingHistory)
+        {
+            _clipboardMonitor?.StartMonitoring(250);
+            PollingToggle.IsChecked = false;
+            PollingToggle.Content = "Monitoring";
+        }
+        else if (_viewModel.CurrentContent != null)
+        {
+            UpdateContentDisplay(_viewModel.CurrentContent);
+        }
+
+        UpdateHistoryButtonStates();
+    }
+
+    private void UpdateHistoryButtonStates()
+    {
+        if (_viewModel == null) return;
+
+        var count = _viewModel.HistoryCount;
+        var position = _viewModel.HistoryPosition;
+
+        HistoryBackButton.IsEnabled = count > 0 && position < count - 1;
+        HistoryForwardButton.IsEnabled = _viewModel.IsViewingHistory && position > 0;
+    }
+
+    private void UpdateContentDisplay(ClipboardContent content)
+    {
+        if (content.Type == ClipboardContentType.Text)
+        {
+            ContentText.Text = content.Text;
+            ContentText.IsVisible = true;
+            ContentImage.IsVisible = false;
+        }
+        else if (content.Type == ClipboardContentType.Image && content.ImageData != null)
+        {
+            ContentText.IsVisible = false;
+            ContentImage.IsVisible = true;
+            using var ms = new MemoryStream(content.ImageData);
+            ContentImage.Source = new Avalonia.Media.Imaging.Bitmap(ms);
+        }
+
+        FilenameText.Text = $"/tmp/{_viewModel!.CurrentFilename}";
     }
 
     private async void Transfer_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -221,6 +308,8 @@ public partial class MainWindow : Window
             StatusText.Text = content.Type == ClipboardContentType.Image
                 ? "Image detected in clipboard"
                 : "Text detected in clipboard";
+
+            _viewModel?.SaveToHistory(content);
         });
     }
 

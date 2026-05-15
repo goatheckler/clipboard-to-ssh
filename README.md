@@ -20,11 +20,12 @@ When using LLM agents via SSH from a Windows workstation, clipboard operations (
 - **Local save** - Also save clipboard content to local `/tmp/`
 - **Pause/Resume** - Toggle clipboard monitoring for sensitive content
 - **Image-only mode** - Only react to image clipboard content
+- **Clipboard history navigation** - Navigate forward/backwards through your clipboard history with keyboard shortcuts (Ctrl+Left/Right)
 - **Dark theme** - Easy on the eyes
 
 ## Screenshot
 
-[Screenshot goes here]
+![App Screenshot](./cedar-jungle-1f.png)
 
 ## Requirements
 

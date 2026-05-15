@@ -2,8 +2,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ClipboardToSsh.ViewModels"
         mc:Ignorable="d" d:DesignWidth="650" d:DesignHeight="500"
         x:Class="ClipboardToSsh.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
         Title="Clipboard to SSH"
         Width="650"
         Height="500"
@@ -11,17 +13,28 @@
         MinHeight="500">
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="Transparent" Padding="5">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">
                 <TextBlock Text="Host:" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0"/>
                 <ComboBox x:Name="HostComboBox" Grid.Column="1"/>
                 <Button Grid.Column="2" Content="Refresh Hosts" Click="RefreshHosts_Click"
                         Margin="10,0,0,0" Padding="10,5"/>
-                <ToggleButton x:Name="PollingToggle" Grid.Column="3" Content="Paused"
+                <ToggleButton x:Name="PollingToggle" Grid.Column="3" Content="Monitoring"
                               IsChecked="False" Click="PollingToggle_Click"
                               MinWidth="90" Margin="10,0,0,0" Padding="10,5"/>
-                <ToggleButton x:Name="ImageOnlyToggle" Grid.Column="4" Content="Images Only"
+                <ToggleButton x:Name="ImageOnlyToggle" Grid.Column="4" Content="All Content"
                               IsChecked="False" Click="ImageOnlyToggle_Click"
                               MinWidth="90" Margin="10,0,0,0" Padding="10,5"/>
+                <TextBlock x:Name="HistoryPositionText" Grid.Column="5" Text=""
+                           VerticalAlignment="Center" Margin="15,0,5,0"
+                           Foreground="#AAA" FontSize="12"/>
+                <Button x:Name="HistoryBackButton" Grid.Column="6" Content="&lt;" Click="HistoryBack_Click"
+                        IsEnabled="{Binding CanNavigateBack}"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        MinWidth="40" Margin="5,0,0,0" Padding="8,5"/>
+                <Button x:Name="HistoryForwardButton" Grid.Column="7" Content="&gt;" Click="HistoryForward_Click"
+                        IsEnabled="{Binding CanNavigateForward}"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        MinWidth="40" Margin="5,0,0,0" Padding="8,5"/>
             </Grid>
         </Border>
 

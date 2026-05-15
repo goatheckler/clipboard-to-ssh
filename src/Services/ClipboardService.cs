@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Input.Platform;
 using Avalonia.Media.Imaging;
@@ -14,6 +15,7 @@ public class ClipboardMonitor
     private byte[]? _lastImageHash;
     private string? _lastText;
     private System.Timers.Timer? _pollingTimer;
+    private CancellationTokenSource? _cts;
 
     public event EventHandler<ClipboardContent>? ClipboardChanged;
 
@@ -36,15 +38,20 @@ public class ClipboardMonitor
         _pollingTimer?.Stop();
         _pollingTimer?.Dispose();
         _pollingTimer = null;
+        _cts?.Cancel();
     }
 
     private async Task CheckClipboard()
     {
+        if (_clipboard == null)
+            return;
+
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        var token = _cts.Token;
+
         try
         {
-            if (_clipboard == null)
-                return;
-
             var bitmap = await _clipboard.TryGetBitmapAsync();
             if (bitmap != null)
             {

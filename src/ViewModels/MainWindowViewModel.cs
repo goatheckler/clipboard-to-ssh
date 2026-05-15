@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading.Tasks;
@@ -15,6 +16,9 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly SshConfigService _sshConfigService;
     private readonly ClipboardMonitor _clipboardMonitor;
     private readonly SftpService _sftpService;
+    private readonly SftpService _sftpServiceForFilename;
+
+    private const int MaxHistoryEntries = 64;
 
     [ObservableProperty]
     private ObservableCollection<SshHost> _hosts = new();
@@ -37,11 +41,36 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private byte[]? _currentImageData;
 
+    [ObservableProperty]
+    private int _historyPosition = -1;
+
+    [ObservableProperty]
+    private int _historyCount;
+
+    [ObservableProperty]
+    private bool _isViewingHistory;
+
+    [ObservableProperty]
+    private string _historyPositionText = "";
+
+    [ObservableProperty]
+    private bool _imageOnlyMode;
+
+    [ObservableProperty]
+    private bool _canNavigateBack;
+
+    [ObservableProperty]
+    private bool _canNavigateForward;
+
+    private List<HistoryEntry> _historyEntries = new();
+    private string? _latestFilename;
+
     public MainWindowViewModel()
     {
         _sshConfigService = new SshConfigService();
         _clipboardMonitor = new ClipboardMonitor();
         _sftpService = new SftpService();
+        _sftpServiceForFilename = new SftpService();
 
         _clipboardMonitor.ClipboardChanged += OnClipboardChanged;
         LoadHosts();
@@ -61,6 +90,16 @@ public partial class MainWindowViewModel : ObservableObject
     public void StopClipboardMonitoring()
     {
         _clipboardMonitor.StopMonitoring();
+    }
+
+    public void PauseClipboardMonitoring()
+    {
+        _clipboardMonitor.StopMonitoring();
+    }
+
+    public void ResumeClipboardMonitoring()
+    {
+        _clipboardMonitor.StartMonitoring(250);
     }
 
     private void LoadHosts()
@@ -105,7 +144,23 @@ public partial class MainWindowViewModel : ObservableObject
             IsTransferring = true;
             StatusMessage = "Transferring...";
 
-            var (filename, data) = _sftpService.GenerateFilenameAndData(CurrentContent);
+            string filename;
+            byte[] data;
+
+            if (IsViewingHistory && HistoryPosition >= 0 && HistoryPosition < _historyEntries.Count)
+            {
+                var entry = _historyEntries[HistoryPosition];
+                filename = entry.Filename;
+                data = entry.ContentType == HistoryContentType.Image
+                    ? entry.ImageData!
+                    : System.Text.Encoding.UTF8.GetBytes(entry.Text ?? "");
+            }
+            else
+            {
+                (filename, data) = _sftpServiceForFilename.GenerateFilenameAndData(CurrentContent);
+                _latestFilename = filename;
+            }
+
             CurrentFilename = filename;
 
             var remotePath = await _sftpService.UploadAsync(SelectedHost, filename, data);
@@ -122,6 +177,123 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    public void SaveToHistory(ClipboardContent content)
+    {
+        if (content.Type == ClipboardContentType.Text && string.IsNullOrWhiteSpace(content.Text))
+            return;
+
+        if (_historyEntries.Count > 0)
+        {
+            var lastEntry = _historyEntries[0];
+            if (lastEntry.ContentType == HistoryContentType.Image && content.Type == ClipboardContentType.Image)
+            {
+                if (lastEntry.ImageData != null && content.ImageData != null &&
+                    lastEntry.ImageData.Length == content.ImageData.Length)
+                {
+                    var sameImage = true;
+                    for (int i = 0; i < lastEntry.ImageData.Length; i++)
+                    {
+                        if (lastEntry.ImageData[i] != content.ImageData[i])
+                        {
+                            sameImage = false;
+                            break;
+                        }
+                    }
+                    if (sameImage) return;
+                }
+            }
+            else if (lastEntry.ContentType == HistoryContentType.Text && content.Type == ClipboardContentType.Text)
+            {
+                if (lastEntry.Text == content.Text) return;
+            }
+        }
+
+        var (filename, _) = _sftpServiceForFilename.GenerateFilenameAndData(content);
+        _latestFilename = filename;
+
+        var entry = HistoryEntry.FromClipboardContent(content, filename);
+        _historyEntries.Insert(0, entry);
+
+        if (_historyEntries.Count > MaxHistoryEntries)
+        {
+            _historyEntries.RemoveAt(_historyEntries.Count - 1);
+        }
+
+        HistoryCount = _historyEntries.Count;
+        HistoryPosition = -1;
+        IsViewingHistory = false;
+        UpdateHistoryPositionText();
+        UpdateNavigationButtonStates();
+    }
+
+    [RelayCommand]
+    private void NavigateBack()
+    {
+        if (HistoryCount == 0 || HistoryPosition >= HistoryCount - 1)
+            return;
+
+        HistoryPosition++;
+        IsViewingHistory = true;
+        UpdateHistoryPositionText();
+        UpdateNavigationButtonStates();
+        LoadHistoryEntry();
+    }
+
+    [RelayCommand]
+    private void NavigateForward()
+    {
+        if (HistoryPosition <= 0)
+        {
+            GoToLatest();
+            return;
+        }
+
+        HistoryPosition--;
+        IsViewingHistory = true;
+        UpdateHistoryPositionText();
+        UpdateNavigationButtonStates();
+        LoadHistoryEntry();
+    }
+
+    [RelayCommand]
+    private void GoToLatest()
+    {
+        HistoryPosition = -1;
+        IsViewingHistory = false;
+        UpdateHistoryPositionText();
+        UpdateNavigationButtonStates();
+    }
+
+    private void LoadHistoryEntry()
+    {
+        var index = HistoryPosition;
+        if (index < 0 || index >= _historyEntries.Count)
+            return;
+
+        var entry = _historyEntries[index];
+        CurrentContent = entry.ToClipboardContent();
+        CurrentImageData = entry.ImageData;
+        CurrentFilename = entry.Filename;
+    }
+
+    private void UpdateHistoryPositionText()
+    {
+        if (!IsViewingHistory || HistoryCount == 0)
+        {
+            HistoryPositionText = "";
+            return;
+        }
+
+        var displayPosition = HistoryCount - HistoryPosition;
+        HistoryPositionText = $"← {displayPosition} of {HistoryCount} →";
+    }
+
+    private void UpdateNavigationButtonStates()
+    {
+        CanNavigateBack = HistoryCount > 1 && HistoryPosition < HistoryCount - 1;
+        CanNavigateForward = IsViewingHistory && HistoryPosition > 0;
+    }
+
     private void OnClipboardChanged(object? sender, ClipboardContent content)
     {
         Dispatcher.UIThread.Invoke(() =>
@@ -131,6 +303,33 @@ public partial class MainWindowViewModel : ObservableObject
             StatusMessage = content.Type == ClipboardContentType.Image
                 ? "Image detected in clipboard"
                 : "Text detected in clipboard";
+
+            if (!IsViewingHistory)
+            {
+                SaveToHistory(content);
+            }
         });
+    }
+
+    public (string filename, byte[] data) GetTransferData()
+    {
+        if (IsViewingHistory && HistoryPosition >= 0 && HistoryPosition < _historyEntries.Count)
+        {
+            var entry = _historyEntries[HistoryPosition];
+            var filename = entry.Filename;
+            var data = entry.ContentType == HistoryContentType.Image
+                ? entry.ImageData!
+                : System.Text.Encoding.UTF8.GetBytes(entry.Text ?? "");
+            return (filename, data);
+        }
+        else
+        {
+            return _sftpServiceForFilename.GenerateFilenameAndData(CurrentContent!);
+        }
+    }
+
+    public string GetLatestFilename()
+    {
+        return _latestFilename ?? "";
     }
 }
