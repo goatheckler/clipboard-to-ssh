@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
@@ -162,11 +163,29 @@ public partial class MainWindow : Window
             return;
 
         var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel?.Clipboard != null)
+        var clipboard = topLevel?.Clipboard;
+
+        if (clipboard == null)
         {
-            await topLevel.Clipboard.SetTextAsync(_currentRemotePath);
-            StatusText.Text = "Path copied";
+            StatusText.Text = "Clipboard unavailable";
+            return;
         }
+
+        for (int i = 0; i < 3; i++)
+        {
+            try
+            {
+                await clipboard.SetTextAsync(_currentRemotePath);
+                StatusText.Text = "Path copied";
+                return;
+            }
+            catch
+            {
+                await Task.Delay(50);
+            }
+        }
+
+        StatusText.Text = "Copy failed - try again";
     }
 
     private void OnClipboardChanged(object? sender, ClipboardContent content)
