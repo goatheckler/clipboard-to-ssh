@@ -18,7 +18,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly SftpService _sftpService;
     private readonly SftpService _sftpServiceForFilename;
 
-    private const int MaxHistoryEntries = 64;
+    private const int MaxEntries = 64;
 
     [ObservableProperty]
     private ObservableCollection<SshHost> _hosts = new();
@@ -27,28 +27,13 @@ public partial class MainWindowViewModel : ObservableObject
     private SshHost? _selectedHost;
 
     [ObservableProperty]
-    private ClipboardContent? _currentContent;
-
-    [ObservableProperty]
     private bool _isTransferring;
 
     [ObservableProperty]
     private string _statusMessage = "Ready";
 
     [ObservableProperty]
-    private string _currentFilename = "";
-
-    [ObservableProperty]
-    private byte[]? _currentImageData;
-
-    [ObservableProperty]
-    private int _historyPosition = -1;
-
-    [ObservableProperty]
-    private int _historyCount;
-
-    [ObservableProperty]
-    private bool _isViewingHistory;
+    private int _currentPosition = -1;
 
     [ObservableProperty]
     private string _historyPositionText = "";
@@ -62,8 +47,10 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private bool _canNavigateForward;
 
-    private List<HistoryEntry> _historyEntries = new();
-    private string? _latestFilename;
+    [ObservableProperty]
+    private ClipboardEntry? _currentEntry;
+
+    private readonly List<ClipboardEntry> _entries = new();
 
     public MainWindowViewModel()
     {
@@ -80,26 +67,6 @@ public partial class MainWindowViewModel : ObservableObject
     {
         _clipboardMonitor = new ClipboardMonitor(clipboard);
         _clipboardMonitor.ClipboardChanged += OnClipboardChanged;
-    }
-
-    public void StartClipboardMonitoring()
-    {
-        _clipboardMonitor.StartMonitoring(250);
-    }
-
-    public void StopClipboardMonitoring()
-    {
-        _clipboardMonitor.StopMonitoring();
-    }
-
-    public void PauseClipboardMonitoring()
-    {
-        _clipboardMonitor.StopMonitoring();
-    }
-
-    public void ResumeClipboardMonitoring()
-    {
-        _clipboardMonitor.StartMonitoring(250);
     }
 
     private void LoadHosts()
@@ -130,225 +97,198 @@ public partial class MainWindowViewModel : ObservableObject
         StatusMessage = $"Loaded {Hosts.Count} hosts from SSH config";
     }
 
-    [RelayCommand]
-    private async Task TransferAsync()
-    {
-        if (SelectedHost == null || CurrentContent == null)
-            return;
-
-        if (IsTransferring)
-            return;
-
-        try
-        {
-            IsTransferring = true;
-            StatusMessage = "Transferring...";
-
-            string filename;
-            byte[] data;
-
-            if (IsViewingHistory && HistoryPosition >= 0 && HistoryPosition < _historyEntries.Count)
-            {
-                var entry = _historyEntries[HistoryPosition];
-                filename = entry.Filename;
-                data = entry.ContentType == HistoryContentType.Image
-                    ? entry.ImageData!
-                    : System.Text.Encoding.UTF8.GetBytes(entry.Text ?? "");
-            }
-            else
-            {
-                (filename, data) = _sftpServiceForFilename.GenerateFilenameAndData(CurrentContent);
-                _latestFilename = filename;
-            }
-
-            CurrentFilename = filename;
-
-            var remotePath = await _sftpService.UploadAsync(SelectedHost, filename, data);
-
-            StatusMessage = $"Uploaded to {remotePath}";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Error: {ex.Message}";
-        }
-        finally
-        {
-            IsTransferring = false;
-        }
-    }
-
-    public void SaveToHistory(ClipboardContent content)
+    public void AddEntry(ClipboardContent content)
     {
         if (content.Type == ClipboardContentType.Text && string.IsNullOrWhiteSpace(content.Text))
             return;
 
-        if (_historyEntries.Count > 0)
-        {
-            var lastEntry = _historyEntries[0];
-            if (lastEntry.ContentType == HistoryContentType.Image && content.Type == ClipboardContentType.Image)
-            {
-                if (lastEntry.ImageData != null && content.ImageData != null &&
-                    lastEntry.ImageData.Length == content.ImageData.Length)
-                {
-                    var sameImage = true;
-                    for (int i = 0; i < lastEntry.ImageData.Length; i++)
-                    {
-                        if (lastEntry.ImageData[i] != content.ImageData[i])
-                        {
-                            sameImage = false;
-                            break;
-                        }
-                    }
-                    if (sameImage) return;
-                }
-            }
-            else if (lastEntry.ContentType == HistoryContentType.Text && content.Type == ClipboardContentType.Text)
-            {
-                if (lastEntry.Text == content.Text) return;
-            }
-        }
+        if (IsKnownFilename(content))
+            return;
 
         var (filename, _) = _sftpServiceForFilename.GenerateFilenameAndData(content);
-        _latestFilename = filename;
 
-        var entry = HistoryEntry.FromClipboardContent(content, filename);
-        _historyEntries.Insert(0, entry);
+        var entry = ClipboardEntry.FromContent(content, filename);
+        _entries.Insert(0, entry);
 
-        if (_historyEntries.Count > MaxHistoryEntries)
+        if (_entries.Count > MaxEntries)
         {
-            _historyEntries.RemoveAt(_historyEntries.Count - 1);
+            _entries.RemoveAt(_entries.Count - 1);
         }
 
-        HistoryCount = _historyEntries.Count;
-        HistoryPosition = -1;
-        IsViewingHistory = false;
-        UpdateHistoryPositionText();
-        UpdateNavigationButtonStates();
+        CurrentPosition = -1;
+        CurrentEntry = _entries[0];
+        UpdateNavigationState();
+    }
+
+    private bool IsKnownFilename(ClipboardContent content)
+    {
+        if (content.Type != ClipboardContentType.Text || content.Text == null)
+            return false;
+
+        var text = content.Text;
+        foreach (var entry in _entries)
+        {
+            if (text == entry.LocalFilename ||
+                text == entry.RemoteFilename ||
+                text == Path.GetFileName(entry.LocalFilename) ||
+                text == Path.GetFileName(entry.RemoteFilename))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     [RelayCommand]
-    private void NavigateBack()
+    public void NavigateBack()
     {
-        if (HistoryCount == 0)
+        if (_entries.Count == 0)
             return;
 
-        if (HistoryPosition < 0)
+        if (CurrentPosition < 0)
         {
-            HistoryPosition = HistoryCount - 1;
+            CurrentPosition = _entries.Count - 1;
         }
-        else if (HistoryPosition >= HistoryCount - 1)
+        else if (CurrentPosition >= _entries.Count - 1)
         {
             return;
         }
         else
         {
-            HistoryPosition++;
+            CurrentPosition++;
         }
 
-        IsViewingHistory = true;
-        UpdateHistoryPositionText();
-        UpdateNavigationButtonStates();
-        LoadHistoryEntry();
+        CurrentEntry = _entries[CurrentPosition];
+        UpdateNavigationState();
     }
 
     [RelayCommand]
-    private void NavigateForward()
+    public void NavigateForward()
     {
-        if (HistoryPosition <= 0)
+        if (_entries.Count == 0)
+            return;
+
+        if (CurrentPosition <= 0)
         {
             GoToLatest();
             return;
         }
 
-        HistoryPosition--;
-        IsViewingHistory = true;
-        UpdateHistoryPositionText();
-        UpdateNavigationButtonStates();
-        LoadHistoryEntry();
+        CurrentPosition--;
+        CurrentEntry = _entries[CurrentPosition];
+        UpdateNavigationState();
     }
 
     [RelayCommand]
-    private void GoToLatest()
+    public void GoToLatest()
     {
-        HistoryPosition = -1;
-        IsViewingHistory = false;
-        UpdateHistoryPositionText();
-        UpdateNavigationButtonStates();
-        if (_historyEntries.Count > 0)
+        if (_entries.Count == 0)
         {
-            var entry = _historyEntries[0];
-            CurrentContent = entry.ToClipboardContent();
-            CurrentImageData = entry.ImageData;
-            CurrentFilename = entry.Filename;
+            CurrentPosition = -1;
+            CurrentEntry = null;
         }
+        else
+        {
+            CurrentPosition = -1;
+            CurrentEntry = _entries[0];
+        }
+        UpdateNavigationState();
     }
 
-    private void LoadHistoryEntry()
+    private void UpdateNavigationState()
     {
-        var index = HistoryPosition;
-        if (index < 0 || index >= _historyEntries.Count)
-            return;
+        var count = _entries.Count;
+        CanNavigateBack = count > 1 && CurrentPosition < count - 1;
+        CanNavigateForward = CurrentPosition > 0;
 
-        var entry = _historyEntries[index];
-        CurrentContent = entry.ToClipboardContent();
-        CurrentImageData = entry.ImageData;
-        CurrentFilename = entry.Filename;
-    }
-
-    private void UpdateHistoryPositionText()
-    {
-        if (!IsViewingHistory || HistoryCount == 0)
+        if (count == 0)
         {
             HistoryPositionText = "";
-            return;
+        }
+        else if (CurrentPosition < 0)
+        {
+            HistoryPositionText = "";
+        }
+        else
+        {
+            var displayPosition = count - CurrentPosition;
+            HistoryPositionText = $"← {displayPosition} of {count} →";
+        }
+    }
+
+    public ClipboardEntry? GetCurrentEntry()
+    {
+        if (CurrentPosition >= 0 && CurrentPosition < _entries.Count)
+        {
+            return _entries[CurrentPosition];
+        }
+        return _entries.Count > 0 ? _entries[0] : null;
+    }
+
+    public (string filename, byte[] data) GetPersistData()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null)
+            throw new InvalidOperationException("No entry to persist");
+
+        byte[] data;
+        if (entry.Content.Type == ClipboardContentType.Image && entry.Content.ImageData != null)
+        {
+            data = entry.Content.ImageData;
+        }
+        else if (entry.Content.Text != null)
+        {
+            data = System.Text.Encoding.UTF8.GetBytes(entry.Content.Text);
+        }
+        else
+        {
+            throw new InvalidOperationException("No data to persist");
         }
 
-        var displayPosition = HistoryCount - HistoryPosition;
-        HistoryPositionText = $"← {displayPosition} of {HistoryCount} →";
+        return (Path.GetFileName(entry.RemoteFilename), data);
     }
 
-    private void UpdateNavigationButtonStates()
+    public string GetRemotePath()
     {
-        CanNavigateBack = HistoryCount > 1 && HistoryPosition < HistoryCount - 1;
-        CanNavigateForward = IsViewingHistory && HistoryPosition > 0;
+        var entry = GetCurrentEntry();
+        return entry?.RemoteFilename ?? "";
     }
+
+    public string GetLocalPath()
+    {
+        var entry = GetCurrentEntry();
+        return entry?.LocalFilename ?? "";
+    }
+
+    public string GetRemoteFilename()
+    {
+        var entry = GetCurrentEntry();
+        return entry != null ? Path.GetFileName(entry.RemoteFilename) : "";
+    }
+
+    public string GetLocalFilename()
+    {
+        var entry = GetCurrentEntry();
+        return entry != null ? Path.GetFileName(entry.LocalFilename) : "";
+    }
+
+    public int EntryCount => _entries.Count;
 
     private void OnClipboardChanged(object? sender, ClipboardContent content)
     {
         Dispatcher.UIThread.Invoke(() =>
         {
-            CurrentContent = content;
-            CurrentImageData = content.ImageData;
+            if (ImageOnlyMode && content.Type == ClipboardContentType.Text)
+                return;
+
             StatusMessage = content.Type == ClipboardContentType.Image
                 ? "Image detected in clipboard"
                 : "Text detected in clipboard";
 
-            if (!IsViewingHistory)
+            if (CurrentPosition < 0)
             {
-                SaveToHistory(content);
+                AddEntry(content);
             }
         });
-    }
-
-    public (string filename, byte[] data) GetTransferData()
-    {
-        if (IsViewingHistory && HistoryPosition >= 0 && HistoryPosition < _historyEntries.Count)
-        {
-            var entry = _historyEntries[HistoryPosition];
-            var filename = entry.Filename;
-            var data = entry.ContentType == HistoryContentType.Image
-                ? entry.ImageData!
-                : System.Text.Encoding.UTF8.GetBytes(entry.Text ?? "");
-            return (filename, data);
-        }
-        else
-        {
-            return _sftpServiceForFilename.GenerateFilenameAndData(CurrentContent!);
-        }
-    }
-
-    public string GetLatestFilename()
-    {
-        return _latestFilename ?? "";
     }
 }

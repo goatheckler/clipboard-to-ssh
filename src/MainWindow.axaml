@@ -3,19 +3,35 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ClipboardToSsh.ViewModels"
+        xmlns:models="clr-namespace:ClipboardToSsh.Models"
         mc:Ignorable="d" d:DesignWidth="650" d:DesignHeight="500"
         x:Class="ClipboardToSsh.MainWindow"
-        x:DataType="vm:MainWindowViewModel"
         Title="Clipboard to SSH"
         Width="650"
         Height="500"
         MinWidth="650"
-        MinHeight="500">
+        MinHeight="500"
+        x:DataType="vm:MainWindowViewModel">
     <DockPanel>
         <Border DockPanel.Dock="Top" Background="Transparent" Padding="5">
             <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">
                 <TextBlock Text="Host:" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                <ComboBox x:Name="HostComboBox" Grid.Column="1"/>
+                <ComboBox x:Name="HostComboBox" Grid.Column="1"
+                          x:DataType="models:SshHost">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:SshHost">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="0,0,10,0"/>
+                                <TextBlock Text="{Binding HostName}" Foreground="#AAA" Margin="0,0,5,0"/>
+                                <TextBlock Text=":" Foreground="#AAA"/>
+                                <TextBlock Text="{Binding Port}" Foreground="#AAA" Margin="0,0,10,0"/>
+                                <TextBlock Text="[" Foreground="#666"/>
+                                <TextBlock Text="{Binding User}" Foreground="#666"/>
+                                <TextBlock Text="]" Foreground="#666"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
                 <Button Grid.Column="2" Content="Refresh Hosts" Click="RefreshHosts_Click"
                         Margin="10,0,0,0" Padding="10,5"/>
                 <ToggleButton x:Name="PollingToggle" Grid.Column="3" Content="Monitoring"
@@ -40,26 +56,31 @@
 
         <Border DockPanel.Dock="Bottom" Background="#333" Padding="5">
             <StackPanel>
-                <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,5">
-                    <TextBlock x:Name="FilenameText" Text=""
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,0,0,5">
+                    <ComboBox x:Name="PathTypeComboBox" Grid.Column="0"
+                              SelectedIndex="0" Width="120" Margin="0,0,10,0"
+                              SelectionChanged="PathTypeComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Remote"/>
+                        <ComboBoxItem Content="Local"/>
+                    </ComboBox>
+
+                    <TextBlock x:Name="FilenameText" Grid.Column="1" Text=""
                                VerticalAlignment="Center"
                                Foreground="#0F0" FontSize="12" FontFamily="Consolas"
                                FontWeight="Bold"/>
-                    <Button x:Name="CopyFilenameButton" Grid.Column="1" Content="Copy"
-                            Click="CopyFilename_Click"
-                            Padding="10,5" Margin="0,0,10,0"/>
+
+                    <Button x:Name="PersistButton" Grid.Column="2" Content="Transfer"
+                            Click="PersistButton_Click"
+                            Padding="15,5" Margin="0,0,10,0"/>
+
+                    <Button x:Name="CopyButton" Grid.Column="3" Content="Copy"
+                            Click="CopyButton_Click"
+                            Padding="10,5"/>
                 </Grid>
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto">
-                    <TextBlock x:Name="StatusText" Text="Ready"
-                               VerticalAlignment="Center"
-                               Foreground="White"/>
-                    <Button x:Name="SaveLocalButton" Grid.Column="1" Content="Save Local"
-                            Click="SaveLocal_Click"
-                            Padding="10,5" Margin="0,0,10,0"/>
-                    <Button x:Name="TransferButton" Grid.Column="2" Content="Transfer"
-                            Click="Transfer_Click"
-                            Padding="15,5"/>
-                </Grid>
+
+                <TextBlock x:Name="StatusText" Text="Ready"
+                           VerticalAlignment="Center"
+                           Foreground="White"/>
             </StackPanel>
         </Border>
 

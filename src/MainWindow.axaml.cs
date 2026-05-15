@@ -16,7 +16,6 @@ public partial class MainWindow : Window
 {
     private MainWindowViewModel? _viewModel;
     private ClipboardMonitor? _clipboardMonitor;
-    private string _currentRemotePath = "";
     private string _lastCopiedFilename = "";
 
     public MainWindow()
@@ -38,13 +37,8 @@ public partial class MainWindow : Window
             _clipboardMonitor.StartMonitoring(250);
 
             LoadHosts();
-            UpdateHistoryButtonStates();
         }
-    }
-
-    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        base.OnAttachedToVisualTree(e);
+        _isInitialized = true;
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -92,14 +86,7 @@ public partial class MainWindow : Window
             PollingToggle.Content = "Monitoring";
             StatusText.Text = "Clipboard polling active";
             _viewModel?.GoToLatestCommand.Execute(null);
-
-            if (_viewModel?.CurrentContent != null)
-            {
-                UpdateContentDisplay(_viewModel.CurrentContent);
-            }
-
-            HistoryPositionText.Text = _viewModel?.HistoryPositionText ?? "";
-            UpdateHistoryButtonStates();
+            UpdateDisplayForCurrentEntry();
         }
     }
 
@@ -110,7 +97,6 @@ public partial class MainWindow : Window
             ContentText.IsVisible = false;
             ContentImage.IsVisible = false;
             ContentText.Text = "";
-            _viewModel!.CurrentContent = null;
             _viewModel!.ImageOnlyMode = true;
             ImageOnlyToggle.Content = "Images Only";
             StatusText.Text = "Image-only mode enabled";
@@ -130,21 +116,14 @@ public partial class MainWindow : Window
         if (_viewModel == null) return;
 
         _viewModel.NavigateBackCommand.Execute(null);
-        HistoryPositionText.Text = _viewModel.HistoryPositionText;
+        UpdateDisplayForCurrentEntry();
 
-        if (_viewModel.IsViewingHistory)
+        if (_viewModel.CurrentPosition >= 0)
         {
             _clipboardMonitor?.StopMonitoring();
             PollingToggle.IsChecked = true;
             PollingToggle.Content = "Paused";
-
-            if (_viewModel.CurrentContent != null)
-            {
-                UpdateContentDisplay(_viewModel.CurrentContent);
-            }
         }
-
-        UpdateHistoryButtonStates();
     }
 
     private void HistoryForward_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -152,53 +131,126 @@ public partial class MainWindow : Window
         if (_viewModel == null) return;
 
         _viewModel.NavigateForwardCommand.Execute(null);
-        HistoryPositionText.Text = _viewModel.HistoryPositionText;
+        UpdateDisplayForCurrentEntry();
 
-        if (!_viewModel.IsViewingHistory)
+        if (_viewModel.CurrentPosition < 0)
         {
             _clipboardMonitor?.StartMonitoring(250);
             PollingToggle.IsChecked = false;
             PollingToggle.Content = "Monitoring";
         }
-        else if (_viewModel.CurrentContent != null)
-        {
-            UpdateContentDisplay(_viewModel.CurrentContent);
-        }
-
-        UpdateHistoryButtonStates();
     }
 
-    private void UpdateHistoryButtonStates()
+    private void UpdateDisplayForCurrentEntry()
     {
         if (_viewModel == null) return;
 
-        var count = _viewModel.HistoryCount;
-        var position = _viewModel.HistoryPosition;
+        HistoryPositionText.Text = _viewModel.HistoryPositionText;
+        UpdateHistoryButtonStates();
 
-        HistoryBackButton.IsEnabled = count > 0 && position < count - 1;
-        HistoryForwardButton.IsEnabled = _viewModel.IsViewingHistory && position > 0;
-    }
+        var entry = _viewModel.GetCurrentEntry();
+        if (entry == null) return;
 
-    private void UpdateContentDisplay(ClipboardContent content)
-    {
-        if (content.Type == ClipboardContentType.Text)
+        if (entry.Content.Type == ClipboardContentType.Text)
         {
-            ContentText.Text = content.Text;
+            ContentText.Text = entry.Content.Text;
             ContentText.IsVisible = true;
             ContentImage.IsVisible = false;
         }
-        else if (content.Type == ClipboardContentType.Image && content.ImageData != null)
+        else
         {
             ContentText.IsVisible = false;
             ContentImage.IsVisible = true;
-            using var ms = new MemoryStream(content.ImageData);
-            ContentImage.Source = new Avalonia.Media.Imaging.Bitmap(ms);
+            if (entry.Content.ImageData != null)
+            {
+                using var ms = new MemoryStream(entry.Content.ImageData);
+                ContentImage.Source = new Avalonia.Media.Imaging.Bitmap(ms);
+            }
         }
 
-        FilenameText.Text = $"/tmp/{_viewModel!.CurrentFilename}";
+        UpdateFilenameDisplay();
     }
 
-    private async void Transfer_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void UpdateFilenameDisplay()
+    {
+        bool isLocal = PathTypeComboBox.SelectedIndex == 1;
+        var entry = _viewModel?.GetCurrentEntry();
+
+        if (entry == null)
+        {
+            FilenameText.Text = "";
+            return;
+        }
+
+        if (isLocal)
+        {
+            FilenameText.Text = entry.LocalFilename;
+        }
+        else
+        {
+            FilenameText.Text = entry.RemoteFilename;
+        }
+    }
+
+    private void PathTypeComboBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_isInitialized)
+            return;
+
+        UpdateFilenameDisplay();
+
+        bool isLocal = PathTypeComboBox.SelectedIndex == 1;
+        PersistButton.Content = isLocal ? "Save Local" : "Transfer";
+    }
+
+    private void OnClipboardChanged(object? sender, ClipboardContent content)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Invoke(() =>
+        {
+            if (ImageOnlyToggle?.IsChecked == true && content.Type == ClipboardContentType.Text)
+            {
+                return;
+            }
+
+            if (content.Type == ClipboardContentType.Text)
+            {
+                var text = content.Text ?? "";
+                var lastCopy = _lastCopiedFilename ?? "";
+                if (!string.IsNullOrEmpty(lastCopy) &&
+                    (text == lastCopy ||
+                     text.EndsWith("/" + lastCopy) ||
+                     text.EndsWith("\\" + lastCopy)))
+                {
+                    _lastCopiedFilename = "";
+                    return;
+                }
+            }
+
+            _viewModel?.AddEntry(content);
+            UpdateDisplayForCurrentEntry();
+        });
+    }
+
+    private async void PersistButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_viewModel?.GetCurrentEntry() == null)
+        {
+            StatusText.Text = "No content to persist";
+            return;
+        }
+
+        bool isLocal = PathTypeComboBox.SelectedIndex == 1;
+        if (isLocal)
+        {
+            await SaveLocalAsync();
+        }
+        else
+        {
+            await TransferAsync();
+        }
+    }
+
+    private async Task TransferAsync()
     {
         if (HostComboBox.SelectedItem is not SshHost selectedHost)
         {
@@ -206,34 +258,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_viewModel?.CurrentContent == null)
-        {
-            StatusText.Text = "No content in clipboard";
-            return;
-        }
-
         try
         {
             StatusText.Text = "Transferring...";
-            TransferButton.IsEnabled = false;
+            PersistButton.IsEnabled = false;
 
-            if (string.IsNullOrEmpty(_currentRemotePath))
-            {
-                var sftpService = new SftpService();
-                var (fname, fdata) = sftpService.GenerateFilenameAndData(_viewModel.CurrentContent);
-                _currentRemotePath = $"/tmp/{fname}";
-                FilenameText.Text = _currentRemotePath;
-                await sftpService.UploadAsync(selectedHost, fname, fdata);
-            }
-            else
-            {
-                var remoteFilename = Path.GetFileName(_currentRemotePath);
-                var fileData = _viewModel!.CurrentContent!.ImageData ??
-                              System.Text.Encoding.UTF8.GetBytes(_viewModel.CurrentContent.Text ?? "");
-                await new SftpService().UploadAsync(selectedHost, remoteFilename, fileData);
-            }
+            var (filename, data) = _viewModel!.GetPersistData();
+            var remotePath = await new SftpService().UploadAsync(selectedHost, filename, data);
 
-            StatusText.Text = $"Uploaded to {_currentRemotePath}";
+            StatusText.Text = $"Uploaded to {remotePath}";
         }
         catch (Exception ex)
         {
@@ -241,30 +274,71 @@ public partial class MainWindow : Window
         }
         finally
         {
-            TransferButton.IsEnabled = true;
+            PersistButton.IsEnabled = true;
         }
     }
 
-    private async void CopyFilename_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async Task SaveLocalAsync()
     {
-        if (string.IsNullOrEmpty(_currentRemotePath))
+        try
+        {
+            StatusText.Text = "Saving locally...";
+            PersistButton.IsEnabled = false;
+
+            var entry = _viewModel!.GetCurrentEntry();
+            if (entry == null)
+            {
+                StatusText.Text = "No content to save";
+                return;
+            }
+
+            if (entry.Content.ImageData != null)
+            {
+                File.WriteAllBytes(entry.LocalFilename, entry.Content.ImageData);
+            }
+            else if (entry.Content.Text != null)
+            {
+                File.WriteAllText(entry.LocalFilename, entry.Content.Text);
+            }
+
+            StatusText.Text = $"Saved to {entry.LocalFilename}";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            PersistButton.IsEnabled = true;
+        }
+    }
+
+    private async void CopyButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var entry = _viewModel?.GetCurrentEntry();
+        if (entry == null)
             return;
 
         var topLevel = TopLevel.GetTopLevel(this);
         var clipboard = topLevel?.Clipboard;
-
         if (clipboard == null)
         {
             StatusText.Text = "Clipboard unavailable";
             return;
         }
 
+        bool isLocal = PathTypeComboBox.SelectedIndex == 1;
+        var pathToCopy = isLocal ? entry.LocalFilename : entry.RemoteFilename;
+        var filenameToTrack = isLocal
+            ? Path.GetFileName(entry.LocalFilename)
+            : Path.GetFileName(entry.RemoteFilename);
+
         for (int i = 0; i < 3; i++)
         {
             try
             {
-                await clipboard.SetTextAsync(_currentRemotePath);
-                _lastCopiedFilename = Path.GetFileName(_currentRemotePath);
+                await clipboard.SetTextAsync(pathToCopy);
+                _lastCopiedFilename = filenameToTrack;
                 StatusText.Text = "Path copied";
                 return;
             }
@@ -277,81 +351,18 @@ public partial class MainWindow : Window
         StatusText.Text = "Copy failed - try again";
     }
 
-    private void OnClipboardChanged(object? sender, ClipboardContent content)
+    private void UpdateHistoryButtonStates()
     {
-        Avalonia.Threading.Dispatcher.UIThread.Invoke(() =>
-        {
-            if (ImageOnlyToggle.IsChecked == true && content.Type == ClipboardContentType.Text)
-            {
-                return;
-            }
+        if (_viewModel == null) return;
 
-            if (content.Type == ClipboardContentType.Text)
-            {
-                var text = content.Text ?? "";
-                if (text == _lastCopiedFilename || text == $"/tmp/{_lastCopiedFilename}" || text.EndsWith(_lastCopiedFilename))
-                {
-                    _lastCopiedFilename = "";
-                    return;
-                }
-            }
-
-            _viewModel!.CurrentContent = content;
-
-            if (content.Type == ClipboardContentType.Text)
-            {
-                ContentText.Text = content.Text;
-                ContentText.IsVisible = true;
-                ContentImage.IsVisible = false;
-            }
-            else if (content.Type == ClipboardContentType.Image && content.ImageData != null)
-            {
-                ContentText.IsVisible = false;
-                ContentImage.IsVisible = true;
-                using var ms = new MemoryStream(content.ImageData);
-                ContentImage.Source = new Avalonia.Media.Imaging.Bitmap(ms);
-            }
-
-            var sftpService = new SftpService();
-            var (filename, _) = sftpService.GenerateFilenameAndData(content);
-            _currentRemotePath = $"/tmp/{filename}";
-            FilenameText.Text = _currentRemotePath;
-
-            StatusText.Text = content.Type == ClipboardContentType.Image
-                ? "Image detected in clipboard"
-                : "Text detected in clipboard";
-
-            _viewModel?.SaveToHistory(content);
-        });
+        HistoryBackButton.IsEnabled = _viewModel.CanNavigateBack;
+        HistoryForwardButton.IsEnabled = _viewModel.CanNavigateForward;
     }
 
-    private void SaveLocal_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private bool _isInitialized = false;
+
+    private void InitializeAfterLoad()
     {
-        if (_viewModel?.CurrentContent == null)
-        {
-            StatusText.Text = "No content in clipboard";
-            return;
-        }
-
-        try
-        {
-            var filename = Path.GetFileName(_currentRemotePath);
-            var localPath = Path.Combine("/tmp", filename);
-
-            if (_viewModel.CurrentContent.ImageData != null)
-            {
-                File.WriteAllBytes(localPath, _viewModel.CurrentContent.ImageData);
-            }
-            else if (_viewModel.CurrentContent.Text != null)
-            {
-                File.WriteAllText(localPath, _viewModel.CurrentContent.Text);
-            }
-
-            StatusText.Text = $"Saved to {localPath}";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"Error: {ex.Message}";
-        }
+        _isInitialized = true;
     }
 }
