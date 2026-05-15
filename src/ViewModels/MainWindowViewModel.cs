@@ -229,10 +229,22 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void NavigateBack()
     {
-        if (HistoryCount == 0 || HistoryPosition >= HistoryCount - 1)
+        if (HistoryCount == 0)
             return;
 
-        HistoryPosition++;
+        if (HistoryPosition < 0)
+        {
+            HistoryPosition = HistoryCount - 1;
+        }
+        else if (HistoryPosition >= HistoryCount - 1)
+        {
+            return;
+        }
+        else
+        {
+            HistoryPosition++;
+        }
+
         IsViewingHistory = true;
         UpdateHistoryPositionText();
         UpdateNavigationButtonStates();
@@ -262,6 +274,13 @@ public partial class MainWindowViewModel : ObservableObject
         IsViewingHistory = false;
         UpdateHistoryPositionText();
         UpdateNavigationButtonStates();
+        if (_historyEntries.Count > 0)
+        {
+            var entry = _historyEntries[0];
+            CurrentContent = entry.ToClipboardContent();
+            CurrentImageData = entry.ImageData;
+            CurrentFilename = entry.Filename;
+        }
     }
 
     private void LoadHistoryEntry()

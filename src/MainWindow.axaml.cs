@@ -90,7 +90,7 @@ public partial class MainWindow : Window
             _clipboardMonitor?.StartMonitoring(250);
             PollingToggle.Content = "Monitoring";
             StatusText.Text = "Clipboard polling active";
-            _viewModel?.NavigateForwardCommand.Execute(null);
+            _viewModel?.GoToLatestCommand.Execute(null);
 
             if (_viewModel?.CurrentContent != null)
             {
