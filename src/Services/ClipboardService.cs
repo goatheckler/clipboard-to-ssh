@@ -45,16 +45,6 @@ public class ClipboardMonitor
             if (_clipboard == null)
                 return;
 
-            var text = await _clipboard.TryGetTextAsync();
-            if (text != null && text != _lastText)
-            {
-                _lastText = text;
-                var content = new ClipboardContent(ClipboardContentType.Text, text, null);
-                _lastContent = content;
-                ClipboardChanged?.Invoke(this, content);
-                return;
-            }
-
             var bitmap = await _clipboard.TryGetBitmapAsync();
             if (bitmap != null)
             {
@@ -68,7 +58,17 @@ public class ClipboardMonitor
                     var content = new ClipboardContent(ClipboardContentType.Image, null, imageData);
                     _lastContent = content;
                     ClipboardChanged?.Invoke(this, content);
+                    return;
                 }
+            }
+
+            var text = await _clipboard.TryGetTextAsync();
+            if (text != null && text != _lastText)
+            {
+                _lastText = text;
+                var content = new ClipboardContent(ClipboardContentType.Text, text, null);
+                _lastContent = content;
+                ClipboardChanged?.Invoke(this, content);
             }
         }
         catch
