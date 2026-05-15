@@ -248,32 +248,6 @@ public partial class MainWindowViewModel : ObservableObject
         return (Path.GetFileName(entry.RemoteFilename), data);
     }
 
-    public string GetRemotePath()
-    {
-        var entry = GetCurrentEntry();
-        return entry?.RemoteFilename ?? "";
-    }
-
-    public string GetLocalPath()
-    {
-        var entry = GetCurrentEntry();
-        return entry?.LocalFilename ?? "";
-    }
-
-    public string GetRemoteFilename()
-    {
-        var entry = GetCurrentEntry();
-        return entry != null ? Path.GetFileName(entry.RemoteFilename) : "";
-    }
-
-    public string GetLocalFilename()
-    {
-        var entry = GetCurrentEntry();
-        return entry != null ? Path.GetFileName(entry.LocalFilename) : "";
-    }
-
-    public int EntryCount => _entries.Count;
-
     private void OnClipboardChanged(object? sender, ClipboardContent content)
     {
         Dispatcher.UIThread.Invoke(() =>
