@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private MainWindowViewModel? _viewModel;
     private ClipboardMonitor? _clipboardMonitor;
     private string _currentRemotePath = "";
+    private string _lastCopiedFilename = "";
 
     public MainWindow()
     {
@@ -263,6 +264,7 @@ public partial class MainWindow : Window
             try
             {
                 await clipboard.SetTextAsync(_currentRemotePath);
+                _lastCopiedFilename = Path.GetFileName(_currentRemotePath);
                 StatusText.Text = "Path copied";
                 return;
             }
@@ -282,6 +284,16 @@ public partial class MainWindow : Window
             if (ImageOnlyToggle.IsChecked == true && content.Type == ClipboardContentType.Text)
             {
                 return;
+            }
+
+            if (content.Type == ClipboardContentType.Text)
+            {
+                var text = content.Text ?? "";
+                if (text == _lastCopiedFilename || text == $"/tmp/{_lastCopiedFilename}" || text.EndsWith(_lastCopiedFilename))
+                {
+                    _lastCopiedFilename = "";
+                    return;
+                }
             }
 
             _viewModel!.CurrentContent = content;
